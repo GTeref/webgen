@@ -99,6 +99,8 @@ const buildPlots = async function() {
   buildHeatmap(expressionData, mutationAndClinicalData);
   buildViolinPlot(allSelectedGenes, expressionData);
   buildDownloadButtons(allSelectedGenes, expressionData, clinicalData);
+  //Construct survival curve
+  buildSurvivalCurves(clinicalData)
   return null;
 };
 
@@ -270,6 +272,17 @@ let getVariantClassification = function (mutationData, barcode,
   }
   return undefined; // If we have no hits for a participant barcode and gene combination, then return undefined
 };
+
+/**
+ * Build survival curves
+ */
+let buildSurvivalCurves = async function(clinicalData) {
+  //Clear contents of survival curve loader div
+  d3.select("#survivalLoaderDiv").html("");
+  let deathCounts = format_survival_date(clinicalData);
+  let survivalCurveInput = calculate_survival_values(deathCounts);
+  create_survival_plot(survivalCurveInput);
+}
 
 /** Renders downloads buttons and sets up onClick() functions.
  *
