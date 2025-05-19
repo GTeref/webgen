@@ -1,127 +1,506 @@
 /**
- * Extracts survival time information from clinical data
- * @param {Array} clinicalData An array of JSON objects for each patient's clinical data
- * @returns An array of JSONs containing the number of lost patients at a corresponding timestamp
+ * Format survival data by cohort
+ * @param {Array} clinicalData - Clinical data array
+ * @returns {Object} Object with cohort names as keys and arrays of survival data as values
  */
-const format_survival_date = function(clinicalData) {
-    let deathCounts = {}
-    //For each participant, construct a new feature for their survival status
-    for(let index = 0; index < clinicalData.length; index++) {
-      let time;
-      if (clinicalData[index].days_to_death != "NA") {
-        time = clinicalData[index].days_to_death
+const formatSurvivalDateByCohort = function(clinicalData) {
+  // Find all unique cohorts in the data
+  const uniqueCohorts = [...new Set(clinicalData.map(d => d.cohort))];
+  
+  // Group data by cohort
+  const cohortGroups = {};
+  
+  uniqueCohorts.forEach(cohort => {
+      // Filter data for this cohort
+      const cohortData = clinicalData.filter(d => d.cohort === cohort);
+      
+      // Process each patient in this cohort
+      const deathCounts = [];
+      
+      cohortData.forEach(patient => {
+          const barcode = patient.tcga_participant_barcode;
+          let daysValue, status;
+          
+          // Parse days_to_death or days_to_last_followup
+          if (patient.days_to_death !== "NA" && patient.vital_status === "1") {
+              daysValue = parseInt(patient.days_to_death);
+              status = 1; // Death event occurred
+          } else if (patient.days_to_last_followup !== "NA") {
+              daysValue = parseInt(patient.days_to_last_followup);
+              status = 0; // Censored (no death event)
+          } else {
+              // Skip patients with no valid data
+              return;
+          }
+          
+          deathCounts.push({
+              barcode: barcode,
+              days: daysValue,
+              status: status
+          });
+      });
+      
+      // Only add cohorts with valid data
+      if (deathCounts.length > 0) {
+          cohortGroups[cohort] = deathCounts;
       }
-      else if(clinicalData[index].days_to_last_followup != "NA") {
-        time = clinicalData[index].days_to_last_followup
-      }
-      else {
-        time = clinicalData[index].days_to_last_known_alive
-      }
-      deathCounts[time] = deathCounts[time] ? deathCounts[time] + 1 : 1
-    }
-    return deathCounts
-}
+  });
+  
+  return cohortGroups;
+};
 
 /**
- * Takes the formatted survival data and computes the survival rates
- * @param {Array} data An array of JSON objects with the normalized survival data
- * @returns A JSON whose values are arrays of JSONs providing the information necessary to plot individual survival curves
- */
-const calculate_survival_values = function(data){
-  //Get unique times in survival data
-  let uniqueDeathTimes = Object.keys(data);
-  let patientCounts = Object.values(data)
-  let initialValue = 0
-  let patientsAtRisk = patientCounts.reduce((accumulator, currentValue) => accumulator + currentValue, initialValue);
-  //Compute survival probabilities
-  let survivalProbsTable = uniqueDeathTimes.map(time => {
-    //Compute number of deaths at time t
-    let deaths = data[time]
-    //Compute number of individuals at risk
-    patientsAtRisk = patientsAtRisk - deaths
-    //Compute survival probability at each time t
-    let survivalProb = 1 - (deaths/patientsAtRisk);
-    return {"time": Number.parseInt(time), "deaths": deaths, "patients_at_risk": patientsAtRisk, "survival_prob": survivalProb};
-  })
-
-  for (let [index, row] of survivalProbsTable.entries()) {
-      let survivalProb = row.survival_prob;
-      let lastCumSurvivalProb = index != 0 ? survivalProbsTable[index-1].cumSurvivalProb : 1;
-      survivalProbsTable[index].cum_survival_prob = lastCumSurvivalProb * survivalProb;
+* Calculate survival values for each cohort using Kaplan-Meier method
+* @param {Object} cohortGroups - Grouped data by cohort
+* @returns {Object} Survival curves by cohort
+*/
+const calculateSurvivalValuesByCohort = function(cohortGroups) {
+  const survivalCurvesByCohort = {};
+  
+  for (const [cohort, deathCounts] of Object.entries(cohortGroups)) {
+      // Sort by days (ascending)
+      deathCounts.sort((a, b) => a.days - b.days);
+      
+      // Calculate survival curve points
+      const survivalCurve = [];
+      let totalPatients = deathCounts.length;
+      let cumulativeSurvival = 1.0;
+      
+      // Add starting point
+      survivalCurve.push({
+          time: 0,
+          survival: cumulativeSurvival,
+          std_error: 0,
+          upper: 1.0,
+          lower: 1.0
+      });
+      
+      // Calculate Kaplan-Meier estimate
+      let atRiskCount = totalPatients;
+      let cumulativeEvents = 0;
+      
+      deathCounts.forEach((point, i) => {
+          if (point.status === 1) {
+              // Only update survival at actual death events
+              cumulativeSurvival *= (atRiskCount - 1) / atRiskCount;
+              cumulativeEvents += 1;
+              
+              // Calculate confidence interval (simplified)
+              const std_error = Math.sqrt(cumulativeEvents / (atRiskCount * (atRiskCount - cumulativeEvents)));
+              const z = 1.96; // 95% confidence
+              const upper = Math.min(1, cumulativeSurvival + z * std_error);
+              const lower = Math.max(0, cumulativeSurvival - z * std_error);
+              
+              survivalCurve.push({
+                  time: point.days,
+                  survival: cumulativeSurvival,
+                  std_error: std_error,
+                  upper: upper,
+                  lower: lower
+              });
+          } else {
+              // For censored data points, add a marker without changing survival
+              survivalCurve.push({
+                  time: point.days,
+                  survival: cumulativeSurvival,
+                  censored: true
+              });
+          }
+          
+          atRiskCount--;
+      });
+      
+      survivalCurvesByCohort[cohort] = survivalCurve;
   }
-  return {"all":survivalProbsTable};
-}
+  
+  return survivalCurvesByCohort;
+};
 
 /**
- * This function renders the survival plots
- * @param {JSON} inputData JSON whose keys represent the different feature values to plot survival curves for
- */
-const create_survival_plot = function(inputData) {
-  let survivalLoaderDiv = "#survivalLoaderDiv";
-  let survivalPlotDiv = "#survivalPlot";
-  // Set up the figure dimensions:
-  let margin = {top: 10, right: 30, bottom: 10, left: 40},
-  width = 505 - margin.left - margin.right,
-  height = 200 - margin.top - margin.bottom;
-  //Declare feature fields
-  let timeFeature = "time";
-  let survivalFeature = "survival_prob"
-  let numSurvivorsFeature = "patients_at_risk";
-  //Extract survival data of interest to plot
-  survivalData = inputData["all"]
-  let maxTime = -1;
-  let plotData = [];
-  for(let index = 0; index < survivalData.length; index++) {
-    if(survivalData[index]["survivalProb"] != -Infinity) {
-      plotData.push({"time":survivalData[index][timeFeature], 
-        "survival_prob":survivalData[index][survivalFeature]});
-      if(survivalData[index][timeFeature] > maxTime)
-        maxTime = survivalData[index][timeFeature]
-    }
+* Create survival plot with separate lines for each cohort
+* @param {Object} survivalCurvesByCohort - Survival curves grouped by cohort
+*/
+const createSurvivalPlotByCohort = function(survivalCurvesByCohort) {
+  // Clear any existing plot
+  d3.select("#survivalPlot").html("");
+  
+  // Set up dimensions and margins
+  const margin = {top: 50, right: 150, bottom: 50, left: 50};
+  const width = 800 - margin.left - margin.right;
+  const height = 500 - margin.top - margin.bottom;
+  
+  // Create SVG element
+  const svg = d3.select("#survivalPlot")
+      .append("svg")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+  
+  // Find max time value across all cohorts for x-axis scale
+  let maxTime = 0;
+  for (const cohort in survivalCurvesByCohort) {
+      const cohortMaxTime = d3.max(survivalCurvesByCohort[cohort], d => d.time);
+      maxTime = Math.max(maxTime, cohortMaxTime);
   }
-  //Create SVG object to append plot to
-  let svgObject = d3.select(survivalLoaderDiv).append("svg")
-    .attr("id", survivalPlotDiv)
-    .attr("viewBox", `0 -35 505 300`)  // This line makes the svg responsive
-    .append("g")
-    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
-  //Build and append x-axis
-  let xScale = d3.scaleLinear()
-    .domain([0, maxTime])
-    .range([0, width]);
-  svgObject.append("g")
-    .attr("transform", "translate(0," + height + ")")
-    .call(d3.axisBottom(xScale))
-    .style("font-size", "8px");
-  //Append x-axis label
-  svgObject.append("text")
-    .attr("transform", "translate(" + width/2 + ", " + (height + margin.top + 25) + ")")
-    .text("Time (Days)")
-    .style("font-size", "12px");
- //Build and append y-axis
-  let yScale = d3.scaleLinear()
-    .domain([0, 1])
-    .range([height, 0])
-  svgObject.append("g").call(d3.axisLeft(yScale))
-    .style("font-size", "8px");
-  //Append y-axis label
-  svgObject.append("text")
-    .attr("transform", "rotate(-90)")
-    .attr("y", -margin.left)
-    .attr("x",-(height / 2.0))
-    .attr("dy", "1em")
-    .style("text-anchor", "middle")
-    .style("font-size", "12px")
-    .text("Survival Rate");
-  //Build survival curve
-  let line = d3.line()
-    .x((data) => xScale(data.time))
-    .y((data) => yScale(data.survival_prob))
-    .curve(d3.curveStep);
-  //Generate survival curve
-  svgObject
-    .append("path")
-    .attr("d", line(plotData))
-    .attr("fill", "none") 
-    .attr("stroke", "blue");
-}
+  
+  // Set up scales
+  const x = d3.scaleLinear()
+      .domain([0, maxTime])
+      .range([0, width]);
+      
+  const y = d3.scaleLinear()
+      .domain([0, 1])
+      .range([height, 0]);
+  
+  // Define color scale for different cohorts
+  const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+  
+  // Create line generator
+  const line = d3.line()
+      .x(d => x(d.time))
+      .y(d => y(d.survival));
+  
+  // Add X and Y axes
+  svg.append("g")
+      .attr("transform", `translate(0,${height})`)
+      .call(d3.axisBottom(x).ticks(5))
+      .append("text")
+      .attr("x", width / 2)
+      .attr("y", 40)
+      .attr("fill", "#000")
+      .style("text-anchor", "middle")
+      .text("Time (days)");
+  
+  svg.append("g")
+      .call(d3.axisLeft(y).ticks(5))
+      .append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("y", -40)
+      .attr("x", -height / 2)
+      .attr("fill", "#000")
+      .style("text-anchor", "middle")
+      .text("Survival Probability");
+  
+  // Add title
+  svg.append("text")
+      .attr("x", width / 2)
+      .attr("y", -20)
+      .attr("text-anchor", "middle")
+      .style("font-size", "16px")
+      .style("font-weight", "bold")
+      .text("Kaplan-Meier Survival Curve by Cohort");
+  
+  // Draw lines for each cohort
+  Object.keys(survivalCurvesByCohort).forEach((cohort, i) => {
+      const curveData = survivalCurvesByCohort[cohort];
+      const curveColor = colorScale(i);
+      
+      // Draw the survival curve line
+      svg.append("path")
+          .datum(curveData)
+          .attr("fill", "none")
+          .attr("stroke", curveColor)
+          .attr("stroke-width", 2)
+          .attr("d", line);
+      
+      // Add censored data points (small circles)
+      svg.selectAll(`.censored-${cohort}`)
+          .data(curveData.filter(d => d.censored))
+          .enter()
+          .append("circle")
+          .attr("cx", d => x(d.time))
+          .attr("cy", d => y(d.survival))
+          .attr("r", 4)
+          .attr("fill", curveColor);
+  });
+  
+  // Add legend
+  const legend = svg.append("g")
+      .attr("class", "legend")
+      .attr("transform", `translate(${width + 20}, 0)`);
+  
+  Object.keys(survivalCurvesByCohort).forEach((cohort, i) => {
+      const lg = legend.append("g")
+          .attr("transform", `translate(0, ${i * 20})`);
+      
+      lg.append("rect")
+          .attr("width", 10)
+          .attr("height", 10)
+          .attr("fill", colorScale(i));
+      
+      lg.append("text")
+          .attr("x", 15)
+          .attr("y", 10)
+          .text(`${cohort} (n=${survivalCurvesByCohort[cohort].length-1})`)
+          .style("font-size", "12px");
+  });
+  
+};
+
+/**
+* Creates the partition selector for survival curves
+*
+* @param {string} partitionDivId - the html id passed over for the partitions div
+* @param {Array} clinicalData - Clinical data array
+* @returns {string[]} list of choices for the partition box
+*/
+const createSurvivalPartitionBox = function(partitionDivId, clinicalData) {
+  // Get the div to place the partition selector
+  var div_box = d3.select(`#${partitionDivId}`);
+  
+  // Set up the header
+  div_box
+      .style('font-size', '14px')
+      .style('font-weight', 'bold')
+      .text('Select stratification variables')
+      .style("margin-top", "20px")
+      .style("margin-left", "10px");
+  
+  div_box.append('br');
+  
+  // Create scrollable container for checkboxes
+  div_box.append('div')
+      .attr('class', 'viewport')
+      .attr("id", "partitionSelectSurvivalPlot")
+      .style('overflow-y', 'auto')
+      .style('height', '365px')
+      .style('width', '280px')
+      .style('text-align', 'left')
+      .style("font-size", "14px")
+      .style("margin-top", "10px")
+      .append('div')
+      .attr('class', 'body');
+  
+  let div_body = div_box.select('.body');
+  var choices = [];
+  
+  // Function to update the selected choices array
+  function update() {
+      choices = [];
+      d3.selectAll(".mySurvivalCheckbox").each(function(d) {
+          let cb = d3.select(this);
+          if(cb.property('checked')) { 
+              choices.push(cb.property('value')); 
+          }
+      });
+  }
+  
+  // Function to rebuild survival curves based on selected partitions
+  function rebuildSurvivalCurves() {
+      update();
+      
+      // Don't stratify if no variables are selected
+      if (choices.length === 0) {
+          // Use regular cohort-based grouping
+          const cohortGroups = formatSurvivalDateByCohort(clinicalData);
+          const survivalCurvesByCohort = calculateSurvivalValuesByCohort(cohortGroups);
+          createSurvivalPlotByCohort(survivalCurvesByCohort);
+          return;
+      }
+      
+      // Otherwise, stratify by the selected variables
+      const stratifiedGroups = formatSurvivalDateByStrata(clinicalData, choices);
+      const survivalCurvesByStrata = calculateSurvivalValuesByCohort(stratifiedGroups);
+      createSurvivalPlotByCohort(survivalCurvesByStrata);
+  }
+  
+  // Function to create a checkbox and label
+  function renderCheckbox(div_obj, data) {
+      const label = div_obj.append('div');
+      const label2 = label.append("label");
+      
+      label2.append("input")
+          .attr('id', data)
+          .attr("class", "mySurvivalCheckbox")
+          .attr("value", data)
+          .attr("type", "checkbox")
+          .on('change', function() {
+              rebuildSurvivalCurves();
+          });
+      
+      label2.append("span")
+          .text(' ' + data)
+          .style('font-weight', 'normal')
+          .style("color", "#5f5f5f");
+  }
+  
+  // Get potential stratification variables
+  // We need to filter to clinical variables that are suitable for stratification
+  let stratificationVars = [];
+  
+  if (clinicalData && clinicalData.length > 0) {
+      // Get all keys from the clinical data
+      const allKeys = Object.keys(clinicalData[0]);
+      
+      // Filter to variables that make sense for stratification
+      stratificationVars = allKeys.filter(key => {
+          // Skip technical IDs and dates
+          if (key.includes('barcode') || key.includes('date') || 
+              key === 'tool' || key === 'cohort') {
+              return false;
+          }
+          
+          // Count distinct values for this key
+          const distinctValues = new Set();
+          clinicalData.forEach(patient => {
+              if (patient[key] !== 'NA' && patient[key] !== null && patient[key] !== undefined) {
+                  distinctValues.add(patient[key]);
+              }
+          });
+          
+          // Only use variables with 2-10 distinct values (categorical)
+          return distinctValues.size >= 2 && distinctValues.size <= 10;
+      });
+  }
+  
+  // Sort variables alphabetically
+  stratificationVars.sort();
+  
+  // Create checkboxes for each stratification variable
+  stratificationVars.forEach(el => renderCheckbox(div_body, el));
+  
+  // Initialize choices array
+  update();
+  
+  return choices;
+};
+
+/**
+* Format survival data by selected stratification variables
+* @param {Array} clinicalData - Clinical data array
+* @param {Array} stratificationVars - Array of variable names to stratify by
+* @returns {Object} Object with strata names as keys and arrays of survival data as values
+*/
+const formatSurvivalDateByStrata = function(clinicalData, stratificationVars) {
+  // If no stratification variables, fall back to cohort
+  if (!stratificationVars || stratificationVars.length === 0) {
+      return formatSurvivalDateByCohort(clinicalData);
+  }
+  
+  // Create strata
+  const strataGroups = {};
+  
+  // Process each patient
+  clinicalData.forEach(patient => {
+      // Create a strata label based on selected variables
+      const strataValues = [];
+      
+      stratificationVars.forEach(variable => {
+          let value = patient[variable];
+          
+          // Skip patients with missing values for stratification variables
+          if (value === 'NA' || value === null || value === undefined) {
+              return;
+          }
+          
+          // Clean up value for display
+          value = value.toString().toLowerCase().replace(/na/i, 'NA');
+          if (value === '0') value = 'No';
+          if (value === '1') value = 'Yes';
+          
+          strataValues.push(`${variable}-${value}`); // Using dash instead of colon for CSS safety
+      });
+      
+      // Skip if we couldn't create a proper strata label
+      if (strataValues.length !== stratificationVars.length) {
+          return;
+      }
+      
+      const strataLabel = strataValues.join('_'); // Using underscore instead of comma for CSS safety
+      
+      // Initialize strata group if not exists
+      if (!strataGroups[strataLabel]) {
+          strataGroups[strataLabel] = [];
+      }
+      
+      // Process survival data
+      let daysValue, status;
+      
+      // Parse days_to_death or days_to_last_followup
+      if (patient.days_to_death !== "NA" && patient.vital_status === "1") {
+          daysValue = parseInt(patient.days_to_death);
+          status = 1; // Death event occurred
+      } else if (patient.days_to_last_followup !== "NA") {
+          daysValue = parseInt(patient.days_to_last_followup);
+          status = 0; // Censored (no death event)
+      } else {
+          // Skip patients with no valid survival data
+          return;
+      }
+      
+      // Add patient to strata group
+      strataGroups[strataLabel].push({
+          barcode: patient.tcga_participant_barcode,
+          days: daysValue,
+          status: status
+      });
+  });
+  
+  // Remove strata with too few samples (need at least 3 patients)
+  const filteredGroups = {};
+  for (const stratum in strataGroups) {
+      if (strataGroups[stratum].length >= 3) {
+          filteredGroups[stratum] = strataGroups[stratum];
+      }
+  }
+  
+  // If all strata were filtered out, return cohort grouping instead
+  if (Object.keys(filteredGroups).length === 0) {
+      console.warn("All strata had fewer than 3 patients. Falling back to cohort grouping.");
+      return formatSurvivalDateByCohort(clinicalData);
+  }
+  
+  return filteredGroups;
+};
+
+/**
+* Modified buildSurvivalCurves function to include partition selector
+* @param {Array} clinicalData - Clinical data array
+*/
+const buildSurvivalCurvesByStrata = function(clinicalData) {
+  // Clear contents of survival curve loader div
+  d3.select("#survivalLoaderDiv").html("");
+  
+  // Clear and set up the survival plot container
+  const loaderDiv = d3.select("#survivalLoaderDiv");
+  
+  // Create a flex container to place elements side by side
+  loaderDiv.append("div")
+      .attr("id", "survivalGridRow")
+      .attr("class", "row")
+      .style("display", "flex")
+      .style("flex-direction", "row")
+      .style("align-items", "flex-start")
+      .style("width", "100%");
+  
+  // Add div for the partition selector (fixed width)
+  loaderDiv.select("#survivalGridRow")
+      .append("div")
+      .attr("id", "survivalPartition")
+      .attr("class", "col s3")
+      .style("flex", "0 0 300px");
+  
+  // Add div for the survival plot (flexible width)
+  loaderDiv.select("#survivalGridRow")
+      .append("div")
+      .attr("id", "survivalPlot")
+      .attr("class", "col s9")
+      .style("flex", "1");
+  
+  // Create the partition selection box
+  createSurvivalPartitionBox("survivalPartition", clinicalData);
+  
+  // Create initial plot by cohort (default)
+  const cohortGroups = formatSurvivalDateByCohort(clinicalData);
+  const survivalCurvesByCohort = calculateSurvivalValuesByCohort(cohortGroups);
+  
+  // Only create plot if we have valid data
+  if (Object.keys(survivalCurvesByCohort).length > 0) {
+      createSurvivalPlotByCohort(survivalCurvesByCohort);
+  } else {
+      d3.select("#survivalPlot")
+          .append("p")
+          .text("No valid survival data available");
+  }
+};
