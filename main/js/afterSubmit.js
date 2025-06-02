@@ -29,7 +29,7 @@ const buildPlots = async function() {
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   
-  const allSelectedGenes = await getAllSelectedGenes();
+  const allSelectedGenes = await getAllSelectedGenes("geneTwoMultipleSelection");
 
   const isEmpty = (x) => {
     return x === undefined || x === null || x.length === 0;
@@ -57,7 +57,25 @@ const buildPlots = async function() {
 
   const selectedGene1 = $(".geneOneMultipleSelection").select2("data").map((gene) => gene.text);
   // Find intersecting barcodes based on Mutation/Clinical Pie Chart selections
-  const intersectedBarcodes = await getBarcodesFromSelectedPieSectors(selectedTumorTypes);
+  const pieSectorBarcodes = await getBarcodesFromSelectedPieSectors(selectedTumorTypes);
+  const histogramBarcodes = await getBarcodesFromSelectedHistogramRange(selectedTumorTypes);
+  console.log(pieSectorBarcodes, histogramBarcodes);
+  let intersectedBarcodes;
+  if(pieSectorBarcodes && histogramBarcodes) {
+    intersectedBarcodes = pieSectorBarcodes.reduce((acc, curr) => {
+        if (histogramBarcodes.includes(curr)) {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+  } else if (pieSectorBarcodes) {
+    intersectedBarcodes = pieSectorBarcodes;
+  } else if (histogramBarcodes) {
+    intersectedBarcodes = histogramBarcodes;
+  } else {
+    intersectedBarcodes = null;
+  }
+  console.log(intersectedBarcodes);
   let cacheGe = await getCacheGE(); // Instantiate cache interface for gene expression
   let expressionData;
   // GET CLINICAL DATA:
@@ -109,9 +127,9 @@ const buildPlots = async function() {
  *
  * @returns {Promise<string[]>} Promise that return array of gene names.
  */
-const getAllSelectedGenes = async function() {
+const getAllSelectedGenes = async function(geneSelectionBox) {
 
-  let selectedGenes = $(".geneTwoMultipleSelection").select2("data").map((gene) => gene.text);
+  let selectedGenes = $(`.${geneSelectionBox}`).select2("data").map((gene) => gene.text);
   
   const genesFromSelectedPathways = await getGenesByPathway();
 

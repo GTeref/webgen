@@ -182,15 +182,17 @@ let buildDataExplorePlots = async function() {
                 // if current feature is a gene,
                 // get values and labels for this feature
                 if(currentFeature[0] === currentFeature[0].toUpperCase()) {
-                    let cacheMu = await getCacheMU(); //Instantiate mutation cache object
+                    let cacheMu = await getCacheMU(); // Instantiate mutation cache object
                     let mutationData = await cacheMu.fetchWrapperMU(selectedTumorTypes, [currentFeature]); // Retrieve mutation data from cache
                     let mutationCounts = computeMutationFrequencies(mutationData); // Obtain map of mutation types and their respective counts
                     uniqueValuesForCurrentFeature = Array.from(mutationCounts.keys()); // Get mutation types from keys()
-                    xCounts = Array.from(mutationCounts.values()); // Get corresponding coutns from values()
-                }
+                    xCounts = Array.from(mutationCounts.values()); // Get corresponding counts from values()
+                    let cacheGe = await getCacheGE();
+                    let geneMutationExpression = await cacheGe.fetchWrapperGE(selectedTumorTypes, [currentFeature]);
+                    await createGeneExpressionHistogram(geneMutationExpression, mutationData, currentFeature);
                 // if current feature is clinical (i.e., not a gene)
                 // get values and labels for this feature 
-                else {
+                } else {
                     let clinicalFeaturesResults = await computeClinicalFeatureFrequencies(xCounts, uniqueValuesForCurrentFeature, currentFeature, continuous);
                     xCounts = clinicalFeaturesResults[0]
                     uniqueValuesForCurrentFeature = clinicalFeaturesResults[1]
@@ -286,11 +288,13 @@ let computeMutationFrequencies = function(mutationData) {
 let computeClinicalFeatureFrequencies = async function (xCounts, uniqueValuesForCurrentFeature, currentClinicalFeatureSelected, continuous) {
 
     let allValuesForCurrentFeature = [];
+    console.log(allClinicalData)
     for(let i = 0; i < allClinicalData.length; i++)
         allValuesForCurrentFeature.push(allClinicalData[i][currentClinicalFeatureSelected]);
     
     let index = clinicalType.findIndex(x => x.name == currentClinicalFeatureSelected);
     clinicalType[index].isSelected = true;
+    console.log(clinicalType[index])
     if (clinicalType[index].type === "continuous") {
         continuous = true;
         uniqueValuesForCurrentFeature = allValuesForCurrentFeature; // changed from uniqueValuesForCurrentFeature = allValuesForCurrentFeature.filter(onlyUnique);
@@ -405,6 +409,8 @@ let setChartDimsAndPlot = async function (uniqueValuesForCurrentFeature, current
                            '<b>Frequency:</b> %{y}',
             type: 'histogram'
         }];
+        console.log(histo_data)
+
 
         // set colors of pie sectors:
         if (!continuous) {
@@ -488,4 +494,316 @@ let setChartDimsAndPlot = async function (uniqueValuesForCurrentFeature, current
         }
 
     }
+}
+
+/**
+ * Creates histograms to visualize gene expression distribution with filtering capability
+ * 
+ * @param {Array} geneMutationExpression - Array of objects containing gene expression data
+ * @param {Array} mutationData - Array of objects containing mutation data
+ * @param {String} currentFeature - The gene being analyzed
+ * @returns {undefined}
+ */
+async function createGeneExpressionHistogram(geneMutationExpression, mutationData, currentFeature) {
+    // Exit if no data is provided
+    if (!geneMutationExpression || geneMutationExpression.length === 0) {
+        console.log("No expression data available for this gene");
+        return;
+    }
+
+    // Extract expression values for tumor samples only
+    const expressionValues = [];
+    const patientBarcodes = [];
+    
+    for (const record of geneMutationExpression) {
+        // Only include tumor samples (TP)
+        if (record.sample_type !== "TP") continue;
+        
+        const expressionValue = record.expression_log2;
+        if (expressionValue !== null && expressionValue !== undefined && !isNaN(expressionValue)) {
+            expressionValues.push(expressionValue);
+            patientBarcodes.push(record.tcga_participant_barcode);
+        }
+    }
+
+    if (expressionValues.length === 0) {
+        console.log("No valid expression data available for this gene");
+        return;
+    }
+
+    // Create single histogram trace (no mutation stratification)
+    const histogramTrace = {
+        x: expressionValues,
+        type: 'histogram',
+        name: `${currentFeature} Expression`,
+        opacity: 0.8,
+        marker: {
+            color: '#3498db', // Single blue color
+            line: {
+                color: 'black',
+                width: 1
+            }
+        },
+        xbins: {
+            size: calculateBinSize(expressionValues)
+        },
+        hovertemplate: 'Expression: %{x}<br>Count: %{y}<extra></extra>'
+    };
+
+    // Create histogram layout with native range selection
+    const histogramLayout = {
+        title: `${currentFeature} Expression Distribution<br><sub>Use range selector below to filter by expression level</sub>`,
+        xaxis: {
+            title: 'Expression Level (log2)',
+            tickfont: { size: 12 },
+            rangeslider: {
+                visible: true,
+                thickness: 0.1
+            },
+            rangeselector: {
+                buttons: [
+                    {
+                        count: 1,
+                        label: 'Reset',
+                        step: 'all'
+                    }
+                ],
+                y: -0.2,
+                x: 0
+            }
+        },
+        yaxis: {
+            title: 'Frequency',
+            tickfont: { size: 12 }
+        },
+        height: 500, // Increased to accommodate range slider
+        width: 600,
+        font: {
+            family: 'Arial, Helvetica, sans-serif'
+        }
+    };
+
+    // Create a div for the histogram if it doesn't exist
+    const parentDiv = document.getElementById("dataexploration");
+    let histogramDiv = document.getElementById(currentFeature + "ExpressionDiv");
+    
+    if (!histogramDiv) {
+        histogramDiv = document.createElement("div");
+        histogramDiv.setAttribute("id", currentFeature + "ExpressionDiv");
+        histogramDiv.setAttribute("style", "float:left;");
+        histogramDiv.setAttribute("class", "col s6");
+        parentDiv.appendChild(histogramDiv);
+    }
+
+    // Add filter status div
+    let filterStatusDiv = document.getElementById(currentFeature + "FilterStatus");
+    if (!filterStatusDiv) {
+        filterStatusDiv = document.createElement("div");
+        filterStatusDiv.setAttribute("id", currentFeature + "FilterStatus");
+        filterStatusDiv.setAttribute("style", "margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; text-align: center;");
+        filterStatusDiv.innerHTML = `<strong>Current Filter:</strong> <span id="${currentFeature}RangeDisplay">All patients (${expressionValues.length})</span>`;
+        histogramDiv.appendChild(filterStatusDiv);
+    }
+
+    // Plot the histogram
+    const plotConfig = {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d'],
+        scrollZoom: false
+    };
+
+    Plotly.newPlot(currentFeature + "ExpressionDiv", [histogramTrace], histogramLayout, plotConfig);
+
+    // Add event listener for range changes
+    document.getElementById(currentFeature + "ExpressionDiv").on('plotly_relayout', function(eventData) {
+        // Handle range slider changes or zoom changes
+        if (eventData['xaxis.range[0]'] !== undefined || eventData['xaxis.range[1]'] !== undefined) {
+            const minRange = eventData['xaxis.range[0]'] || Math.min(...expressionValues);
+            const maxRange = eventData['xaxis.range[1]'] || Math.max(...expressionValues);
+            
+            // Count patients in selected range
+            const filteredCount = expressionValues.filter(val => 
+                val >= minRange && val <= maxRange
+            ).length;
+            
+            // Update filter status display
+            const rangeDisplay = document.getElementById(currentFeature + "RangeDisplay");
+            
+            // Check if this is essentially the full range (no real filtering)
+            const dataMin = Math.min(...expressionValues);
+            const dataMax = Math.max(...expressionValues);
+            const isFullRange = (Math.abs(minRange - dataMin) < 0.01) && (Math.abs(maxRange - dataMax) < 0.01);
+            
+            if (isFullRange) {
+                rangeDisplay.textContent = `All patients (${expressionValues.length})`;
+                applyExpressionFilter(currentFeature, null);
+            } else {
+                rangeDisplay.textContent = `Range: ${minRange.toFixed(2)} to ${maxRange.toFixed(2)} (${filteredCount} patients)`;
+                applyExpressionFilter(currentFeature, {min: minRange, max: maxRange});
+            }
+        }
+        
+        // Handle range slider reset
+        if (eventData['xaxis.autorange'] === true) {
+            const rangeDisplay = document.getElementById(currentFeature + "RangeDisplay");
+            rangeDisplay.textContent = `All patients (${expressionValues.length})`;
+            applyExpressionFilter(currentFeature, null);
+        }
+    });
+}
+
+/**
+ * Apply expression level filter to the patient cohort
+ * This function integrates with the existing filtering system used by pie charts
+ * 
+ * @param {String} gene - The gene being filtered
+ * @param {Object|null} range - The expression range {min, max} or null to clear filter
+ */
+function applyExpressionFilter(gene, range) {
+    if (range) {
+        console.log(`Applying expression filter for ${gene}: ${range.min.toFixed(2)} to ${range.max.toFixed(2)}`);
+        
+        // Store the range in selectedContinuousFeatures following the same pattern as pie charts
+        selectedContinuousFeatures[gene] = [range.min, range.max];
+        
+        console.log('Updated selectedContinuousFeatures:', selectedContinuousFeatures);
+        
+    } else {
+        console.log(`Clearing expression filter for ${gene}`);
+        
+        // Remove the filter from selectedContinuousFeatures
+        if (selectedContinuousFeatures[gene]) {
+            delete selectedContinuousFeatures[gene];
+        }
+        
+        console.log('Updated selectedContinuousFeatures:', selectedContinuousFeatures);
+    }
+}
+
+/**
+ * Get patient barcodes from selected histogram expression ranges
+ * 
+ * @param {Array} selectedTumorTypes - Array of selected tumor types
+ * @returns {Array} Array of patient barcodes that match expression range criteria
+ */
+async function getBarcodesFromSelectedHistogramRange(selectedTumorTypes) {
+    let histogramFilteredBarcodes = [];
+    
+    // Get all genes that have expression range filters
+    let genesWithExpressionFilters = Object.keys(selectedContinuousFeatures).filter(key => {
+        // Check if this key represents a gene (starts with uppercase) and has a range
+        return key[0] === key[0].toUpperCase() && 
+               selectedContinuousFeatures[key] && 
+               Array.isArray(selectedContinuousFeatures[key]) &&
+               selectedContinuousFeatures[key].length >= 2;
+    });
+    
+    console.log('Genes with expression filters:', genesWithExpressionFilters);
+    console.log('Current selectedContinuousFeatures:', selectedContinuousFeatures);
+    
+    if (genesWithExpressionFilters.length === 0) {
+        return []; // No expression filters applied
+    }
+    
+    // Fetch gene expression cache
+    let cacheGe = await getCacheGE();
+    
+    // Process each gene with expression filters
+    for (let gene of genesWithExpressionFilters) {
+        let rangeValue = selectedContinuousFeatures[gene];
+        let minExpression = rangeValue[0];
+        let maxExpression = rangeValue[1];
+        
+        console.log(`Processing expression filter for ${gene}: ${minExpression} to ${maxExpression}`);
+        
+        // Fetch gene expression data for this gene
+        let geneExpressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, [gene]);
+        
+        // Filter by expression range and tumor samples only
+        let filteredExpressionData = geneExpressionData.filter(record => {
+            return record.sample_type === "TP" && 
+                   record.expression_log2 !== null &&
+                   record.expression_log2 !== undefined &&
+                   !isNaN(record.expression_log2) &&
+                   record.expression_log2 >= minExpression && 
+                   record.expression_log2 <= maxExpression;
+        });
+        
+        // Extract unique barcodes for this gene
+        let barcodesForThisGene = filteredExpressionData.map(record => record.tcga_participant_barcode);
+        
+        // Remove duplicates
+        function onlyUnique(value, index, self) {
+            return self.indexOf(value) === index;
+        }
+        barcodesForThisGene = barcodesForThisGene.filter(onlyUnique);
+        
+        console.log(`Found ${barcodesForThisGene.length} patients for ${gene} expression filter`);
+        
+        // Store barcodes for this gene
+        histogramFilteredBarcodes.push({
+            gene: gene,
+            range: [minExpression, maxExpression],
+            barcodes: barcodesForThisGene
+        });
+    }
+    
+    // If only one gene filter, return those barcodes
+    if (histogramFilteredBarcodes.length === 1) {
+        return histogramFilteredBarcodes[0].barcodes;
+    }
+    
+    // If multiple gene filters, compute intersection
+    if (histogramFilteredBarcodes.length > 1) {
+        let intersectedBarcodes = histogramFilteredBarcodes[0].barcodes;
+        
+        for (let i = 1; i < histogramFilteredBarcodes.length; i++) {
+            intersectedBarcodes = intersectedBarcodes.filter(barcode => 
+                histogramFilteredBarcodes[i].barcodes.includes(barcode)
+            );
+        }
+        
+        console.log(`Intersection of ${histogramFilteredBarcodes.length} expression filters: ${intersectedBarcodes.length} patients`);
+        return intersectedBarcodes;
+    }
+    
+    return [];
+}
+
+/**
+ * Helper function to calculate appropriate bin size based on data distribution
+ * 
+ * @param {Array} data - Array of expression values
+ * @returns {Number} - Appropriate bin size
+ */
+function calculateBinSize(data) {
+    // Calculate IQR (Interquartile Range) based bin size using Freedman-Diaconis rule
+    if (data.length < 2) return 0.5; // Default if not enough data
+    
+    // Sort the data
+    const sortedData = [...data].sort((a, b) => a - b);
+    
+    // Find min and max
+    const min = sortedData[0];
+    const max = sortedData[sortedData.length - 1];
+    
+    // If range is too small, use a default bin size
+    if (max - min < 0.1) return 0.1;
+    
+    // Calculate quartiles
+    const q1Index = Math.floor(sortedData.length * 0.25);
+    const q3Index = Math.floor(sortedData.length * 0.75);
+    const q1 = sortedData[q1Index];
+    const q3 = sortedData[q3Index];
+    const iqr = q3 - q1;
+    
+    // Freedman-Diaconis rule: 2 * IQR * n^(-1/3)
+    const binSize = 2 * iqr * Math.pow(data.length, -1/3);
+    
+    // If calculated bin size is too small or too large, use reasonable defaults
+    if (binSize < 0.1 || isNaN(binSize)) return 0.5;
+    if (binSize > 5) return 2;
+    
+    return binSize;
 }
