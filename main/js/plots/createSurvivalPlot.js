@@ -144,6 +144,47 @@ const createSurvivalPlotByCohort = function(survivalCurvesByCohort) {
       maxTime = Math.max(maxTime, cohortMaxTime);
   }
   
+  // Create a tooltip
+  let tooltip = d3.select("#survivalPlot")
+    .append("div")
+    .style("opacity", 0)
+    .attr("id", "survivalPlotTooltip")
+    .attr("class", "tooltip")
+    .style("background-color", "white")
+    .style("border", "solid")
+    .style("border-width", "2px")
+    .style("border-radius", "5px")
+    .style("padding", "5px")
+
+    // Three functions that change the tooltip when user hover / move / leave a cell
+  let mouseover = function(d) {
+    tooltip
+        .style("opacity", 1)
+    d3.select(this)
+        .style("stroke", "black")
+        .style("opacity", 1)
+  }
+  
+  let mousemove = function(d) {
+    tooltip
+        .style("left", (d3.mouse(this)[0]+70) + "px")
+        .style("top", (d3.mouse(this)[1]) + "px")
+        .attr("transform", "translate(" + width/4 + ")")
+
+        for (prop in this) {
+            let spacing = "\xa0\xa0\xa0\xa0|\xa0\xa0\xa0\xa0";
+            var tooltipstring = "\xa0\xa0" +
+                                `Time: ${String(d.time)} days\n` + spacing +
+                                `Survival Probability: ${String(Math.round(d.survival * 1000, 4)/1000)}`;
+            return tooltip.style("visibility", "visible").html(tooltipstring);
+        };
+  }
+  let mouseleave = function(d) {
+        tooltip
+        .style("opacity", 0)
+        d3.select(this)
+        .style("stroke", "none")
+  }
   // Set up scales
   const x = d3.scaleLinear()
       .domain([0, maxTime])
@@ -202,7 +243,7 @@ const createSurvivalPlotByCohort = function(survivalCurvesByCohort) {
           .attr("fill", "none")
           .attr("stroke", curveColor)
           .attr("stroke-width", 2)
-          .attr("d", line);
+          .attr("d", line)
       
       // Add censored data points (small circles)
       svg.selectAll(`.censored-${cohort}`)
@@ -212,7 +253,10 @@ const createSurvivalPlotByCohort = function(survivalCurvesByCohort) {
           .attr("cx", d => x(d.time))
           .attr("cy", d => y(d.survival))
           .attr("r", 4)
-          .attr("fill", curveColor);
+          .attr("fill", curveColor)
+          .on("mouseover", mouseover)
+          .on("mousemove", mousemove)
+          .on("mouseleave", mouseleave);
   });
   
   // Add legend
