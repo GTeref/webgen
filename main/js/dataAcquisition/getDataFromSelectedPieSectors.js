@@ -127,7 +127,7 @@ async function getBarcodesFromSelectedHistogramRange(selectedTumorTypes) {
   console.log('Genes with expression filters:', genesWithExpressionFilters);
   
   if (genesWithExpressionFilters.length === 0) {
-      return []; // No expression filters applied
+      return null; // No expression filters applied
   }
   
   // Fetch gene expression cache
