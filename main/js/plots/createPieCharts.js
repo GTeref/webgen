@@ -536,14 +536,6 @@ async function createGeneExpressionHistogram(geneMutationExpression, mutationDat
         x: expressionValues,
         type: 'histogram',
         name: `${currentFeature} Expression`,
-        opacity: 0.8,
-        marker: {
-            color: '#3498db', // Single blue color
-            line: {
-                color: 'black',
-                width: 1
-            }
-        },
         xbins: {
             size: calculateBinSize(expressionValues)
         },
@@ -552,12 +544,17 @@ async function createGeneExpressionHistogram(geneMutationExpression, mutationDat
 
     // Create histogram layout with native range selection
     const histogramLayout = {
-        title: `${currentFeature} Expression Distribution<br><sub>Use range selector below to filter by expression level</sub>`,
+        bargap: 0.05,
+        height: 400,
+        width: 500,
+        dragmode: 'select',
+        selectdirection: 'h',
+        title: `${currentFeature} Expression Distribution`,
         xaxis: {
             title: 'Expression Level (log2)',
             tickfont: { size: 12 },
             rangeslider: {
-                visible: true,
+                visible: false,
                 thickness: 0.1
             },
             rangeselector: {
@@ -576,8 +573,6 @@ async function createGeneExpressionHistogram(geneMutationExpression, mutationDat
             title: 'Frequency',
             tickfont: { size: 12 }
         },
-        height: 500, // Increased to accommodate range slider
-        width: 600,
         font: {
             family: 'Arial, Helvetica, sans-serif'
         }
@@ -596,14 +591,14 @@ async function createGeneExpressionHistogram(geneMutationExpression, mutationDat
     }
 
     // Add filter status div
-    let filterStatusDiv = document.getElementById(currentFeature + "FilterStatus");
-    if (!filterStatusDiv) {
-        filterStatusDiv = document.createElement("div");
-        filterStatusDiv.setAttribute("id", currentFeature + "FilterStatus");
-        filterStatusDiv.setAttribute("style", "margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; text-align: center;");
-        filterStatusDiv.innerHTML = `<strong>Current Filter:</strong> <span id="${currentFeature}RangeDisplay">All patients (${expressionValues.length})</span>`;
-        histogramDiv.appendChild(filterStatusDiv);
-    }
+    // let filterStatusDiv = document.getElementById(currentFeature + "FilterStatus");
+    // if (!filterStatusDiv) {
+    //     filterStatusDiv = document.createElement("div");
+    //     filterStatusDiv.setAttribute("id", currentFeature + "FilterStatus");
+    //     filterStatusDiv.setAttribute("style", "margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; text-align: center;");
+    //     filterStatusDiv.innerHTML = `<strong>Current Filter:</strong> <span id="${currentFeature}RangeDisplay">All patients (${expressionValues.length})</span>`;
+    //     histogramDiv.appendChild(filterStatusDiv);
+    // }
 
     // Plot the histogram
     const plotConfig = {
