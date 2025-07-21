@@ -313,7 +313,7 @@ const createSurvivalPartitionBox = function(partitionDivId, clinicalData) {
   
   div_box.append('br');
   
-  // Create scrollable container for checkboxes
+  // Create scrollable container for radio buttons
   div_box.append('div')
       .attr('class', 'viewport')
       .attr("id", "partitionSelectSurvivalPlot")
@@ -332,7 +332,7 @@ const createSurvivalPartitionBox = function(partitionDivId, clinicalData) {
   // Function to update the selected choices array
   function update() {
       choices = [];
-      d3.selectAll(".mySurvivalCheckbox").each(function(d) {
+      d3.selectAll(".mySurvivalRadio").each(function(d) {
           let cb = d3.select(this);
           if(cb.property('checked')) { 
               choices.push(cb.property('value')); 
@@ -359,16 +359,17 @@ const createSurvivalPartitionBox = function(partitionDivId, clinicalData) {
       createSurvivalPlotByCohort(survivalCurvesByStrata);
   }
   
-  // Function to create a checkbox and label
-  function renderCheckbox(div_obj, data) {
+  // Function to create a radio button and label
+  function renderRadioButton(div_obj, data) {
       const label = div_obj.append('div');
       const label2 = label.append("label");
       
       label2.append("input")
           .attr('id', data)
-          .attr("class", "mySurvivalCheckbox")
+          .attr("class", "mySurvivalRadio")
           .attr("value", data)
-          .attr("type", "checkbox")
+          .attr("type", "radio")
+          .attr("name", "stratification")
           .on('change', function() {
               rebuildSurvivalCurves();
           });
@@ -391,7 +392,7 @@ const createSurvivalPartitionBox = function(partitionDivId, clinicalData) {
       stratificationVars = allKeys.filter(key => {
           // Skip technical IDs and dates
           if (key.includes('barcode') || key.includes('date') || 
-              key === 'tool' || key === 'cohort') {
+              key === 'tool') {
               return false;
           }
           
@@ -411,8 +412,8 @@ const createSurvivalPartitionBox = function(partitionDivId, clinicalData) {
   // Sort variables alphabetically
   stratificationVars.sort();
   
-  // Create checkboxes for each stratification variable
-  stratificationVars.forEach(el => renderCheckbox(div_body, el));
+  // Create radio button for each stratification variable
+  stratificationVars.forEach(el => renderRadioButton(div_body, el));
   
   // Initialize choices array
   update();
