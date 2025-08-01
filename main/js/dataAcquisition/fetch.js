@@ -7,7 +7,7 @@
  * @returns {Promise<Object.<string, Array>>} Fetched data.
  */
 const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
-  const base = "https://corsproxy.io";
+  const base = "https://cors-proxy-webgen.vercel.app";
   // Remove a leading / in the endpoint so we don't have duplicate / in
   // the url. Using // in a url is valid but it feels dirty.
   if (endpoint.startsWith("/")) {
@@ -15,7 +15,8 @@ const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
   }
   endpoint = `http://firebrowse.org/api/v1/${endpoint}`;
   params = new URLSearchParams(params);
-  const url = `${base}?${endpoint}?${params.toString()}`;
+  const encodedUri = encodeURIComponent(`${endpoint}?${params.toString()}`)
+  const url = `${base}/api/proxy?url=${encodedUri}`;
   const minimalJson = { [expectedKey]: [] };
 
   const response = await fetch(url);
@@ -25,7 +26,7 @@ const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
   }
   try {
     const json = await response.json();
-    return json;
+    return json.data;
   } catch(error) {
     console.log(`${expectedKey} is empty, returning an object with empty ${expectedKey} `);
     return minimalJson;
@@ -218,8 +219,8 @@ firebrowse.fetchClinicalFH = async function({cohorts, genes, barcodes, pageNum})
  */
 firebrowse.fetchCohorts = async function() {
   const params = { format: "json" };
-  const data = await firebrowse.fetch("/Metadata/Cohorts", params);
-  return data.Cohorts;
+  const fetchResponse = await firebrowse.fetch("/Metadata/Cohorts", params);
+  return fetchResponse.Cohorts;
 };
 
 /** Get the number of mRNASeq samples per cohort.
@@ -241,8 +242,8 @@ firebrowse.fetchCounts = async function(cohorts) {
     data_type: "mrnaseq",
     totals: "true",
   };
-  const data = await firebrowse.fetch("/Metadata/Counts", params);
-  return data.Counts;
+  const fetchResponse = await firebrowse.fetch("/Metadata/Counts", params);
+  return fetchResponse.Counts;
 };
 
 firebrowse.fetchMutationMAF = async function ({cohorts, genes}) {
