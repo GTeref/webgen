@@ -106,51 +106,91 @@ getBarcodesFromSelectedPieSectors = async function(selectedTumorTypes) {
   return intersectedBarcodes
 }
 
-
-getExpressionDataFromIntersectedBarcodes = async function(intersectedBarcodes, cohortQuery, expressionQuery){
-  //let allData = allClinicalData;
-  let cacheBar = await getCacheBAR(); // Instantiate barcode caching interface
-  let barcodesByCohort = await cacheBar.fetchWrapperBAR(cohortQuery); // Get barcodes grouped by cohort to fetch clinical data
-  let cacheClin = await getCacheCLIN(); // Instantiate clinical data caching interface
-  let allData = await cacheClin.fetchWrapperCLIN(cohortQuery, barcodesByCohort); // allData is used when no pie slices are chosen
-
-  // if no pie sectors were selected, return allData
-  if(intersectedBarcodes === undefined) {
-
-    // Validation of user inputs should prevent allData from being undefined, but we
-    // should not depend on state outside of the function to check our values here.
-    if (allData === undefined) {
-      console.log("allData is undefined, returning early.")
-      return
-    }
-    let allBarcodes = allData.map(x => x.tcga_participant_barcode);
-    const smartCache = await getCacheGE();
-    let res = await smartCache.fetchWrapperGE(cohortQuery, expressionQuery, allBarcodes);
-    return res;
-
-  // if there are NO barcodes at the intersection, we cannot build gene expression visualizations
-  } else if(intersectedBarcodes.length == 0) {
-    // Remove the loader
-    document.getElementById('heatmapLoaderDiv').classList.remove('loader');
-    document.getElementById('violinLoaderDiv').classList.remove('loader');
-
-    let sorryDiv = document.getElementById("sorryDiv");
-    sorryDiv.innerHTML = "";
-    para = document.createElement("P");
-    para.setAttribute('style', 'text-align: center; color: black; font-family: Georgia, "Times New Roman", Times, serif');
-    para.setAttribute('id', 'noIntersectPara');
-    para.innerText = "No patient barcodes exist for the combination of pie sectors selected.";
-    sorryDiv.appendChild(para);
-
-  // if there IS/ARE barcode(s) at the intersection, build heatmap and violin plots
-  } else {
-    sorryDiv.innerHTML = "";
-
-    // Filter expression data based on intersection of barcodes
-    // The final data array may include a fewer number of barcodes than that contained in
-    // the intersectedBarcodes array if RNAseq data is not available for all patient barcodes
-    // contained in intersectedBarcodes
-    const smartCache = await getCacheGE();
-    return await smartCache.fetchWrapperGE(cohortQuery, expressionQuery, intersectedBarcodes);
+/**
+ * Get patient barcodes from selected histogram expression ranges
+ * 
+ * @param {Array} selectedTumorTypes - Array of selected tumor types
+ * @returns {Array} Array of patient barcodes that match expression range criteria
+ */
+async function getBarcodesFromSelectedHistogramRange(selectedTumorTypes) {
+  let histogramFilteredBarcodes = [];
+  
+  // Get all genes that have expression range filters
+  console.log(selectedContinuousFeatures)
+  let genesWithExpressionFilters = Object.keys(selectedContinuousFeatures).filter(key => {
+      // Check if this key represents a gene (starts with uppercase) and has a range
+      return key[0] === key[0].toUpperCase() && 
+             selectedContinuousFeatures[key] && 
+             selectedContinuousFeatures[key].length >= 2;
+  });
+  
+  console.log('Genes with expression filters:', genesWithExpressionFilters);
+  
+  if (genesWithExpressionFilters.length === 0) {
+      return []; // No expression filters applied
   }
+  
+  // Fetch gene expression cache
+  let cacheGe = await getCacheGE();
+  
+  // Process each gene with expression filters
+  for (let gene of genesWithExpressionFilters) {
+      let rangeValue = selectedContinuousFeatures[gene];
+      let minExpression = rangeValue[0];
+      let maxExpression = rangeValue[1];
+      
+      console.log(`Processing expression filter for ${gene}: ${minExpression} to ${maxExpression}`);
+      
+      // Fetch gene expression data for this gene
+      let geneExpressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, [gene]);
+      
+      // Filter by expression range and tumor samples only
+      let filteredExpressionData = geneExpressionData.filter(record => {
+          return record.sample_type === "TP" && 
+                 record.expression_log2 !== null &&
+                 record.expression_log2 !== undefined &&
+                 !isNaN(record.expression_log2) &&
+                 record.expression_log2 >= minExpression && 
+                 record.expression_log2 <= maxExpression;
+      });
+      
+      // Extract unique barcodes for this gene
+      let barcodesForThisGene = filteredExpressionData.map(record => record.tcga_participant_barcode);
+      
+      // Remove duplicates
+      function onlyUnique(value, index, self) {
+          return self.indexOf(value) === index;
+      }
+      barcodesForThisGene = barcodesForThisGene.filter(onlyUnique);
+      
+      console.log(`Found ${barcodesForThisGene.length} patients for ${gene} expression filter`);
+      
+      // Store barcodes for this gene
+      histogramFilteredBarcodes.push({
+          gene: gene,
+          range: [minExpression, maxExpression],
+          barcodes: barcodesForThisGene
+      });
+  }
+  
+  // If only one gene filter, return those barcodes
+  if (histogramFilteredBarcodes.length === 1) {
+      return histogramFilteredBarcodes[0].barcodes;
+  }
+  
+  // If multiple gene filters, compute intersection
+  if (histogramFilteredBarcodes.length > 1) {
+      let intersectedBarcodes = histogramFilteredBarcodes[0].barcodes;
+      
+      for (let i = 1; i < histogramFilteredBarcodes.length; i++) {
+          intersectedBarcodes = intersectedBarcodes.filter(barcode => 
+              histogramFilteredBarcodes[i].barcodes.includes(barcode)
+          );
+      }
+      
+      console.log(`Intersection of ${histogramFilteredBarcodes.length} expression filters: ${intersectedBarcodes.length} patients`);
+      return intersectedBarcodes;
+  }
+  
+  return [];
 }
