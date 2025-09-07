@@ -107,7 +107,7 @@ getBarcodesFromSelectedFeatures = async function(selectedTumorTypes) {
           let minExpression = rangeValue[0];
           let maxExpression = rangeValue[1];
           
-          console.log(`Processing expression filter for ${gene}: ${minExpression} to ${maxExpression}`);
+          // console.log(`Processing expression filter for ${gene}: ${minExpression} to ${maxExpression}`);
           
           // Fetch gene expression data for this gene
           let geneExpressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, [gene]);
@@ -139,7 +139,7 @@ getBarcodesFromSelectedFeatures = async function(selectedTumorTypes) {
       }
   }
 
-  console.log(barcodesReppingAllSelectionsForEachFeature)
+  // console.log(barcodesReppingAllSelectionsForEachFeature)
 
   function intersectValues(kv) {
     let arrays;
@@ -186,7 +186,7 @@ getBarcodesFromSelectedFeatures = async function(selectedTumorTypes) {
   }
   
   const common = intersectValues(barcodesReppingAllSelectionsForEachFeature);
-  console.log(common);
+  // console.log(common);
 
   return common
 }
