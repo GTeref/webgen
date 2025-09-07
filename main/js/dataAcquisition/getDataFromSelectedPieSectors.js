@@ -1,196 +1,192 @@
 
-// ***** Get intersection of barcodes from selected pie sectors (below) *****
+// ***** Get intersection of barcodes from selections in data explore charts (below) *****
 
-getBarcodesFromSelectedPieSectors = async function(selectedTumorTypes) {
-  // a "field" is either a gene name or a clinical feature
+getBarcodesFromSelectedFeatures = async function(selectedTumorTypes) {
+
+  // retrieve selection data from global variables
   let selectedCategoricalFields = Object.keys(selectedCategoricalFeatures);
-  let concatFilteredBarcodes = [];
+  let selectedContinuousFields = Object.keys(selectedContinuousFeatures);
+
+  let barcodesReppingAllSelectionsForEachFeature = [];
   let cacheMu = await getCacheMU(); // Instantiate caching interface for mutation data
   let cacheBar = await getCacheBAR(); // Instantiate caching interface for barcode data
   let cacheClin = await getCacheCLIN(); // Instantiate caching interface for clinical data
-  let barcodesByCohort = await cacheBar.fetchWrapperBAR(selectedTumorTypes); // Get all barcodes for the selected cohorts
-  let clinicalData = await cacheClin.fetchWrapperCLIN(selectedTumorTypes, barcodesByCohort); // Fetch clinical data for cohorts of interest
-  clinicalData = clinicalData.map(obj => obj.clinical_data); // Extract mutation_data property for each cohort
-  clinicalData = clinicalData.flat(); // Use flat() to make patients' clinical data a 1-D array
-  // LOOP THRU ALL CLICKED FIELDS
+  
+  let allBarcodesForSelectedTumorType = await cacheBar.fetchWrapperBAR(selectedTumorTypes); // Get all barcodes for the selected tumor type(s)
+  
+  let allClinicalDataForSelectedTumorTypes = await cacheClin.fetchWrapperCLIN(selectedTumorTypes, allBarcodesForSelectedTumorType); // Fetch clinical data for all patients with selected tumor type(s)
+  allClinicalDataForSelectedTumorTypes = allClinicalDataForSelectedTumorTypes.map(obj => obj.clinical_data); // Extract mutation_data property for each cohort
+  allClinicalDataForSelectedTumorTypes = allClinicalDataForSelectedTumorTypes.flat(); // Use flat() to make patients' clinical data a 1-D array
+
+  // LOOP THRU ALL CLICKED ~CATEGORICAL~ FIELDS (whether from gene mutation plot or metadata)
+  // (e.g., one gene at a time, or one metadata field at a time)
   for(let i = 0; i < selectedCategoricalFields.length; i++) {
+
     let currentField = selectedCategoricalFields[i];
+
     // if current selected sector belongs to a gene...
     if(currentField[i].toUpperCase() == currentField[i]) {
-      let currentGene = currentField;
-      let mutationDataForThisGene = await cacheMu.fetchWrapperMU(selectedTumorTypes, [currentGene]); // Fetch mutation data for currentGene
-      let clickedMutations = selectedCategoricalFeatures[currentGene]; // Get array of selected mutations
-      concatFilteredBarcodes[currentGene] = []; // Initialize to empty array to use push()
-      //If mutations have been selected, then append the relevant barcodes
-      if(clickedMutations.length > 0) {
-        // Iterate over mutation data for a specific gene to get patients with mutation types of interest
-        for(let index = 0; index < mutationDataForThisGene.length; index++) {
-          // If mutation_label property for current patient is in array of selected mutation types, then append to barcodes array
-          if(clickedMutations.includes(mutationDataForThisGene[index].mutation_label))
-            concatFilteredBarcodes[currentGene].push(mutationDataForThisGene[index]["tcga_participant_barcode"]); // Append patient barcode to concatFilteredBarcodes
-        }
-      }
-      //If no mutations have been selected, then we will append all the barcodes to the array
-      else {
-        for(let index = 0; index < mutationDataForThisGene.length; index++) {
-          concatFilteredBarcodes[currentGene].push(mutationDataForThisGene[index]["tcga_participant_barcode"]); // Apend patient barcode to concatFilteredBarcodes
-        } 
-      }
 
+      let currentGene = currentField;
+
+      let allMutationDataForThisGene = await cacheMu.fetchWrapperMU(selectedTumorTypes, [currentGene]); // Fetch all mutation data for currentGene
+      
+      let clickedMutations = selectedCategoricalFeatures[currentGene]; // Get array of selected mutations
+      
+      barcodesReppingAllSelectionsForEachFeature[currentGene+'mutationFilt'] = []; // Initialize to empty array to use push()
+
+      if(clickedMutations.length > 0) {
+        barcodesReppingAllSelectionsForEachFeature[currentGene+'mutationFilt'] = allMutationDataForThisGene
+          .filter(record => clickedMutations.includes(record.mutation_label))
+          .map(record => record.tcga_participant_barcode);
+
+      }
+      // We are basically getting lists of barcodes, repping ppl who have particular mutations in particular genes
+
+      // If no mutations have been selected, then we will append all the barcodes to the array
+      // else {
+      //   barcodesReppingAllSelectionsForEachFeature[currentGene] = allMutationDataForThisGene.map(record => record.tcga_participant_barcode);
+      // }
+
+    // ELSE, CURRENT CATEGORICAL FIELD IS A "CLINICAL" ONE
     } else {
 
       let currentClinicalFeature = currentField;
+      let clickedClinicalValues = selectedCategoricalFeatures[currentClinicalFeature];
+
       let filteredClinicalData = [];
       let uniqueBarcodes;
 
-      let clickedClinicalValues = selectedCategoricalFeatures[currentClinicalFeature];
-
+      function onlyUnique(value, index, self) {
+        return self.indexOf(value) === index;
+      }
+      // for each value of the 
       for(let j = 0; j < clickedClinicalValues.length; j++) {
 
         let currentClinicalValue = clickedClinicalValues[j];
 
-        filteredClinicalData = clinicalData.filter(person => (person[currentClinicalFeature] == currentClinicalValue))
-
+        // filter the clinical data object to only include entries (i.e., barcodes) that have the selected values for the clinical data field
+        filteredClinicalData = allClinicalDataForSelectedTumorTypes.filter(person => (person[currentClinicalFeature] == currentClinicalValue))
+        // now just get the barcodes from those entries
         let onlyBarcodes = filteredClinicalData.map(x => x.tcga_participant_barcode);
-
-        function onlyUnique(value, index, self) {
-          return self.indexOf(value) === index;
-        }
         uniqueBarcodes = onlyBarcodes.filter(onlyUnique);
 
-        if(concatFilteredBarcodes['' + currentClinicalFeature] == undefined)
-          concatFilteredBarcodes['' + currentClinicalFeature] = uniqueBarcodes;
+        if (barcodesReppingAllSelectionsForEachFeature[currentClinicalFeature] === undefined)
+          barcodesReppingAllSelectionsForEachFeature[currentClinicalFeature] = uniqueBarcodes;
         else
-          concatFilteredBarcodes['' + currentClinicalFeature] = concatFilteredBarcodes['' + currentClinicalFeature].concat(uniqueBarcodes);
+          barcodesReppingAllSelectionsForEachFeature[currentClinicalFeature] = barcodesReppingAllSelectionsForEachFeature[currentClinicalFeature].concat(uniqueBarcodes);
       }
     }
   }
-  // loop through all range data
-  for(let continuousFeature of Object.keys(selectedContinuousFeatures)) {
-    let rangeValue = selectedContinuousFeatures[continuousFeature]; // Get range of data to filter clinicalData by
-    filteredRangeData = clinicalData.filter(person => (person[continuousFeature] >= rangeValue[0] && person[continuousFeature] <= rangeValue[1]))
 
-    let onlyBarcodes = filteredRangeData.map(x => x.tcga_participant_barcode);
+  // LOOP THRU ALL CLICKED ~CONTINUOUS~ FIELDS (whether from gene mutation plot or metadata)
+  // (e.g., one gene at a time, or one metadata field at a time)
+  for(let i = 0; i < selectedContinuousFields.length; i++) {
 
-    function onlyUnique(value, index, self) {
-      return self.indexOf(value) === index;
-    }
-    uniqueBarcodes = onlyBarcodes.filter(onlyUnique);
+    let currentField = selectedContinuousFields[i];
 
-    if(concatFilteredBarcodes['' + continuousFeature] == undefined)
-      concatFilteredBarcodes['' + continuousFeature] = uniqueBarcodes;
-    else
-      concatFilteredBarcodes['' + continuousFeature] = concatFilteredBarcodes['' + continuousFeature].concat(uniqueBarcodes);
-  }
+    let rangeValue = selectedContinuousFeatures[currentField]; // Get range of data to filter allClinicalDataForSelectedTumorTypes by
+    let onlyBarcodes = [];
 
+    // if current continuous field is a GENE
+    if (currentField[0] === currentField[0].toUpperCase()) {
 
-  // Get intersection of barcodes from selected pie sectors
-  let clicked_gene_mutation = Object.keys(concatFilteredBarcodes);
-  let intersectedBarcodes;
-
-  // If user clicked 0 or 1 gene/mutation combos, simply use these barcodes
-  if(clicked_gene_mutation.length <= 1) {
-    let currentGene = clicked_gene_mutation[0];
-    intersectedBarcodes = concatFilteredBarcodes[currentGene]; // barcode(s) for selected gene mutation combo in given cancer type
-
-  // If user clicked >1 gene/mutation combos, compute intersection
-  } else {
-    for(let i = 0; i < clicked_gene_mutation.length - 1; i++) {
-      let currentGene = clicked_gene_mutation[i];
-      let nextGene = clicked_gene_mutation[i + 1];
-      let barcodesForCurrentGene = concatFilteredBarcodes[currentGene]; // barcode(s) for selected gene mutation combo in given cancer type
-      let barcodesForNextGene = concatFilteredBarcodes[nextGene];
-      intersectedBarcodes = barcodesForCurrentGene.filter(x => barcodesForNextGene.includes(x));
-    }
-  }
-  return intersectedBarcodes
-}
-
-/**
- * Get patient barcodes from selected histogram expression ranges
- * 
- * @param {Array} selectedTumorTypes - Array of selected tumor types
- * @returns {Array} Array of patient barcodes that match expression range criteria
- */
-async function getBarcodesFromSelectedHistogramRange(selectedTumorTypes) {
-  let histogramFilteredBarcodes = [];
-  
-  // Get all genes that have expression range filters
-  console.log(selectedContinuousFeatures)
-  let genesWithExpressionFilters = Object.keys(selectedContinuousFeatures).filter(key => {
-      // Check if this key represents a gene (starts with uppercase) and has a range
-      return key[0] === key[0].toUpperCase() && 
-             selectedContinuousFeatures[key] && 
-             selectedContinuousFeatures[key].length >= 2;
-  });
-  
-  console.log('Genes with expression filters:', genesWithExpressionFilters);
-  
-  if (genesWithExpressionFilters.length === 0) {
-      return []; // No expression filters applied
-  }
-  
-  // Fetch gene expression cache
-  let cacheGe = await getCacheGE();
-  
-  // Process each gene with expression filters
-  for (let gene of genesWithExpressionFilters) {
-      let rangeValue = selectedContinuousFeatures[gene];
-      let minExpression = rangeValue[0];
-      let maxExpression = rangeValue[1];
-      
-      console.log(`Processing expression filter for ${gene}: ${minExpression} to ${maxExpression}`);
-      
-      // Fetch gene expression data for this gene
-      let geneExpressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, [gene]);
-      
-      // Filter by expression range and tumor samples only
-      let filteredExpressionData = geneExpressionData.filter(record => {
-          return record.sample_type === "TP" && 
-                 record.expression_log2 !== null &&
-                 record.expression_log2 !== undefined &&
-                 !isNaN(record.expression_log2) &&
-                 record.expression_log2 >= minExpression && 
-                 record.expression_log2 <= maxExpression;
+      // Fetch gene expression cache
+      let cacheGe = await getCacheGE();
+            
+      let genesWithExpressionFilters = Object.keys(selectedContinuousFeatures).filter(key => {
+        // Check if this key represents a gene (starts with uppercase) and has a range
+        return key[0] === key[0].toUpperCase() && 
+            selectedContinuousFeatures[key] && 
+            Array.isArray(selectedContinuousFeatures[key]) &&
+            selectedContinuousFeatures[key].length >= 2;
       });
-      
-      // Extract unique barcodes for this gene
-      let barcodesForThisGene = filteredExpressionData.map(record => record.tcga_participant_barcode);
-      
-      // Remove duplicates
-      function onlyUnique(value, index, self) {
-          return self.indexOf(value) === index;
+      // Process each gene with expression filters
+      for (let gene of genesWithExpressionFilters) {
+          let rangeValue = selectedContinuousFeatures[gene];
+          let minExpression = rangeValue[0];
+          let maxExpression = rangeValue[1];
+          
+          console.log(`Processing expression filter for ${gene}: ${minExpression} to ${maxExpression}`);
+          
+          // Fetch gene expression data for this gene
+          let geneExpressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, [gene]);
+
+          // Filter by expression range and tumor samples only
+          let filteredExpressionData = geneExpressionData.filter(record => {
+              return record.sample_type === "TP" && 
+                  record.expression_log2 !== null &&
+                  record.expression_log2 !== undefined &&
+                  !isNaN(record.expression_log2) &&
+                  record.expression_log2 >= minExpression && 
+                  record.expression_log2 <= maxExpression;
+          });
+          
+
+          // Extract unique barcodes for this gene
+          onlyBarcodes = filteredExpressionData.map(record => record.tcga_participant_barcode);
+
+          barcodesReppingAllSelectionsForEachFeature[gene+'expressionFilt'] = onlyBarcodes
+
       }
-      barcodesForThisGene = barcodesForThisGene.filter(onlyUnique);
-      
-      console.log(`Found ${barcodesForThisGene.length} patients for ${gene} expression filter`);
-      
-      // Store barcodes for this gene
-      histogramFilteredBarcodes.push({
-          gene: gene,
-          range: [minExpression, maxExpression],
-          barcodes: barcodesForThisGene
-      });
-  }
-  
-  // If only one gene filter, return those barcodes
-  if (histogramFilteredBarcodes.length === 1) {
-      return histogramFilteredBarcodes[0].barcodes;
-  }
-  
-  // If multiple gene filters, compute intersection
-  if (histogramFilteredBarcodes.length > 1) {
-      let intersectedBarcodes = histogramFilteredBarcodes[0].barcodes;
-      
-      for (let i = 1; i < histogramFilteredBarcodes.length; i++) {
-          intersectedBarcodes = intersectedBarcodes.filter(barcode => 
-              histogramFilteredBarcodes[i].barcodes.includes(barcode)
-          );
+
+    } else {
+
+        filteredRangeData = allClinicalDataForSelectedTumorTypes.filter(person => (person[currentField] >= rangeValue[0] && person[currentField] <= rangeValue[1]))
+        onlyBarcodes = filteredRangeData.map(x => x.tcga_participant_barcode);  
+        barcodesReppingAllSelectionsForEachFeature[currentField] = onlyBarcodes
+
       }
-      
-      console.log(`Intersection of ${histogramFilteredBarcodes.length} expression filters: ${intersectedBarcodes.length} patients`);
-      return intersectedBarcodes;
+  }
+
+  console.log(barcodesReppingAllSelectionsForEachFeature)
+
+  function intersectValues(kv) {
+    let arrays;
+  
+    if (kv instanceof Map) {
+      arrays = Array.from(kv.values());
+    } else if (Array.isArray(kv)) {
+      // Handle arrays with named properties (Object.values grabs them)
+      const vals = Object.values(kv);
+      // If entries-like [[key, arr], ...], pick the arr
+      if (vals.every(v => Array.isArray(v) && v.length === 2 && Array.isArray(v[1]))) {
+        arrays = vals.map(v => v[1]);
+      } else {
+        arrays = vals.filter(Array.isArray); // named props or array-of-arrays
+        if (arrays.length === 0) arrays = kv.filter?.(Array.isArray) ?? [];
+      }
+    } else if (kv && typeof kv === 'object') {
+      arrays = Object.values(kv).filter(Array.isArray);
+    } else {
+      return [];
+    }
+  
+    if (!arrays.length || arrays.some(a => a.length === 0)) return [];
+  
+    // Dedupe each, start with smallest, intersect via Sets
+    const deduped = arrays.map(a => {
+      const s = new Set(); const out = [];
+      for (const x of a) if (!s.has(x)) { s.add(x); out.push(x); }
+      return out;
+    }).sort((a,b) => a.length - b.length);
+  
+    const [first, ...rest] = deduped;
+    const restSets = rest.map(a => new Set(a));
+  
+    const out = [];
+    const seen = new Set();
+    for (const x of first) {
+      if (!seen.has(x) && restSets.every(s => s.has(x))) {
+        seen.add(x);
+        out.push(x);
+      }
+    }
+    return out;
   }
   
-  return [];
+  const common = intersectValues(barcodesReppingAllSelectionsForEachFeature);
+  console.log(common);
+
+  return common
 }
