@@ -29,7 +29,7 @@ const buildPlots = async function() {
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   
-  const allSelectedGenes = await getAllSelectedGenes();
+  const allSelectedGenes = await getAllSelectedGenes("geneTwoMultipleSelection");
 
   const isEmpty = (x) => {
     return x === undefined || x === null || x.length === 0;
@@ -56,17 +56,20 @@ const buildPlots = async function() {
   // GET EXPRESSION DATA:
 
   const selectedGene1 = $(".geneOneMultipleSelection").select2("data").map((gene) => gene.text);
-  // Find intersecting barcodes based on Mutation/Clinical Pie Chart selections
-  const intersectedBarcodes = await getBarcodesFromSelectedPieSectors(selectedTumorTypes);
   let cacheGe = await getCacheGE(); // Instantiate cache interface for gene expression
   let expressionData;
+
   // GET CLINICAL DATA:
   // Get clinical data for either intersected barcodes or entire cohort
   let clinicalData;
   let cacheBar = await getCacheBAR(); // Instantiate cache interface for barcodes
   let barcodesByCohort = await cacheBar.fetchWrapperBAR(selectedTumorTypes); // Fetch all barcodes for selected cohorts
   let cacheClin = await getCacheCLIN(); // Instantiate cache interface for clinical data
-  if (intersectedBarcodes && intersectedBarcodes.length) {
+
+  let intersectedBarcodes = await getBarcodesFromSelectedFeatures(selectedTumorTypes);
+
+  if (intersectedBarcodes.length > 0) {
+
     // If intersectedBarcodes is populated, then iterate over each cohort's barcodes and filter by the barcodes of interest
     for(let index = 0; index < barcodesByCohort.length; index++) {
       let obj = barcodesByCohort[index];
@@ -76,14 +79,19 @@ const buildPlots = async function() {
     clinicalData = await cacheClin.fetchWrapperCLIN(selectedTumorTypes, barcodesByCohort); // Fetch clinical data from cache
     expressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, allSelectedGenes, intersectedBarcodes); // Extract expression data only at intersectedBarcodes
   } 
-  else {
-    console.log(intersectedBarcodes)
-    //Give user alert that the pie chart filters produces an empty cohort
-    window.alert("The gene mutation and/or metadata filter(s) produced a cohort with no patients. No filters will be applied to the data visualized.")
+  else if(intersectedBarcodes == null) {
     expressionData = await cacheGe.fetchWrapperGE(selectedTumorTypes, allSelectedGenes); // Extract expression data for all patients in each cohort
     // Pass in barcodes from expressionData
     clinicalData = await cacheClin.fetchWrapperCLIN(selectedTumorTypes, barcodesByCohort); // Fetch clinical data from cache
   }
+  else {
+    //Set screen text to indicate that no plots were generated due to lack of patient barcodes
+    handleEmptyCohort();
+    return null;
+  }
+  expressionData = (expressionData || []).filter(
+    r => r && allSelectedGenes.includes(r.gene)
+  );
   cache.set('rnaSeq', 'expressionData', expressionData); // Set localStorage entry for expression data
   clinicalData = clinicalData.map(obj => obj.clinical_data); // Extract clinical_data property from each element
   clinicalData = clinicalData.flat();   // Flatten clinicalData into a 1-D array
@@ -95,6 +103,7 @@ const buildPlots = async function() {
   let mutationAndClinicalData = mergeClinicalAndMutationData(selectedGene1, mutationData, clinicalData); // Combine mutation data and clinical data into single array of JSON objects
   localStorage.setItem("mutationAndClinicalData", JSON.stringify(mutationAndClinicalData));
   localStorage.setItem("mutationAndClinicalFeatureKeys", Object.keys((mutationAndClinicalData[0])).sort());
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   buildHeatmap(expressionData, mutationAndClinicalData);
   buildViolinPlot(allSelectedGenes, expressionData);
@@ -109,9 +118,9 @@ const buildPlots = async function() {
  *
  * @returns {Promise<string[]>} Promise that return array of gene names.
  */
-const getAllSelectedGenes = async function() {
+const getAllSelectedGenes = async function(geneSelectionBox) {
 
-  let selectedGenes = $(".geneTwoMultipleSelection").select2("data").map((gene) => gene.text);
+  let selectedGenes = $(`.${geneSelectionBox}`).select2("data").map((gene) => gene.text);
   
   const genesFromSelectedPathways = await getGenesByPathway();
 
@@ -198,7 +207,40 @@ const buildViolinPlot = function(geneQuery, expressionData) {
   var violinLoaderDiv = document.getElementById("violinLoaderDiv");
   violinLoaderDiv.classList.remove("loader");
 
-  //Setup Materialize Grid
+  ///////////////////////////////////
+  // DISPLAY NUMBER OF SAMPLES IN COHORT
+  ///////////////////////////////////
+
+  var meme = document.getElementById("violinLoaderDiv");  
+
+  var numCohortBarcodes2 = document.createElement("div");
+  numCohortBarcodes2.id = "numCohortBarcodes2";
+  numCohortBarcodes2.className = "row";
+
+  meme.appendChild(numCohortBarcodes2);
+
+  let displayNumberSamplesInCohort = function () {
+      let existingPara = document.getElementById("numSamplesInCohortText2");
+      if (existingPara) {
+          existingPara.remove();
+      }
+      // build label:
+      let para = document.createElement("p");
+      // Style the paragraph
+      para.style.textAlign = 'center';
+      para.style.color = '#4db6ac';
+      para.style.fontFamily = 'Georgia, "Times New Roman", Times, serif';
+      para.id = "numSamplesInCohortText2";
+
+      para.innerText = "Number of samples in cohort: " + (d3.map(expressionData, d => d.tcga_participant_barcode).keys()).length;
+      numCohortBarcodes2.appendChild(para);
+  };
+
+  displayNumberSamplesInCohort()
+
+  ///////////////////////////////////
+
+  // Setup Materialize Grid
   addDivInside("violinGridRow", violinLoaderDiv.id);
   var gridRow = document.getElementById("violinGridRow");
   gridRow.classList.add("row");
@@ -490,3 +532,15 @@ let downloadClinicalData = function(cohortID, clinicalData, barcodes_clin) {
     saveFile(csv_string_clin, "WebGen_clinical.csv");
   }
 }
+
+let handleEmptyCohort = function () {
+  let empty_cohort_message = "The gene mutation and/or metadata filter(s) produced a cohort with no patients. To see figures, please change the gene mutation and/or metadata filter(s)."
+  // Remove the loaders from heatmap, violin, and survival tabs
+  document.getElementById("heatmapLoaderDiv").classList.remove("loader");
+  document.getElementById("violinLoaderDiv").classList.remove("loader");
+  document.getElementById("survivalLoaderDiv").classList.remove("loader");
+  // Set text of each plot tab
+  d3.select("#heatmapLoaderDiv").html(empty_cohort_message);
+  d3.select("#violinLoaderDiv").html(empty_cohort_message);
+  d3.select("#survivalLoaderDiv").html(empty_cohort_message);
+};
