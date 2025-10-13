@@ -56,34 +56,20 @@ const buildPlots = async function() {
   // GET EXPRESSION DATA:
 
   const selectedGene1 = $(".geneOneMultipleSelection").select2("data").map((gene) => gene.text);
-  // Find intersecting barcodes based on Mutation/Clinical Pie Chart selections
-  const pieSectorBarcodes = await getBarcodesFromSelectedPieSectors(selectedTumorTypes);
-  const histogramBarcodes = await getBarcodesFromSelectedHistogramRange(selectedTumorTypes);
-  console.log("Selection Barcodes: ", pieSectorBarcodes, histogramBarcodes);
-  let intersectedBarcodes;
-  if(pieSectorBarcodes && histogramBarcodes) {
-    intersectedBarcodes = pieSectorBarcodes.reduce((acc, curr) => {
-        if (histogramBarcodes.includes(curr)) {
-          acc.push(curr);
-        }
-        return acc;
-      }, []);
-  } else if (pieSectorBarcodes) {
-    intersectedBarcodes = pieSectorBarcodes;
-  } else if (histogramBarcodes) {
-    intersectedBarcodes = histogramBarcodes;
-  } else {
-    intersectedBarcodes = null;
-  }
   let cacheGe = await getCacheGE(); // Instantiate cache interface for gene expression
   let expressionData;
+
   // GET CLINICAL DATA:
   // Get clinical data for either intersected barcodes or entire cohort
   let clinicalData;
   let cacheBar = await getCacheBAR(); // Instantiate cache interface for barcodes
   let barcodesByCohort = await cacheBar.fetchWrapperBAR(selectedTumorTypes); // Fetch all barcodes for selected cohorts
   let cacheClin = await getCacheCLIN(); // Instantiate cache interface for clinical data
-  if (intersectedBarcodes && intersectedBarcodes.length) {
+
+  let intersectedBarcodes = await getBarcodesFromSelectedFeatures(selectedTumorTypes);
+
+  if (intersectedBarcodes.length > 0) {
+
     // If intersectedBarcodes is populated, then iterate over each cohort's barcodes and filter by the barcodes of interest
     for(let index = 0; index < barcodesByCohort.length; index++) {
       let obj = barcodesByCohort[index];
@@ -103,6 +89,9 @@ const buildPlots = async function() {
     handleEmptyCohort();
     return null;
   }
+  expressionData = (expressionData || []).filter(
+    r => r && allSelectedGenes.includes(r.gene)
+  );
   cache.set('rnaSeq', 'expressionData', expressionData); // Set localStorage entry for expression data
   clinicalData = clinicalData.map(obj => obj.clinical_data); // Extract clinical_data property from each element
   clinicalData = clinicalData.flat();   // Flatten clinicalData into a 1-D array
@@ -114,6 +103,7 @@ const buildPlots = async function() {
   let mutationAndClinicalData = mergeClinicalAndMutationData(selectedGene1, mutationData, clinicalData); // Combine mutation data and clinical data into single array of JSON objects
   localStorage.setItem("mutationAndClinicalData", JSON.stringify(mutationAndClinicalData));
   localStorage.setItem("mutationAndClinicalFeatureKeys", Object.keys((mutationAndClinicalData[0])).sort());
+
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   buildHeatmap(expressionData, mutationAndClinicalData);
   buildViolinPlot(allSelectedGenes, expressionData);
