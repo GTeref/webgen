@@ -27,7 +27,9 @@ const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
   }
   try {
     const json = await response.json();
-    return json.data;
+    if (json.data) return json.data;
+    if (json[expectedKey]) return json;
+    console.error(`unexpected response struct for ${expectedKey}:`, json);
   } catch(error) {
     console.log(`${expectedKey} is empty, returning an object with empty ${expectedKey} `);
     return minimalJson;
