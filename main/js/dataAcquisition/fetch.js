@@ -25,12 +25,13 @@ const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
     console.error(`Fetching ${expectedKey} data was unsuccessful.`);
     return minimalJson;
   }
-  const json = await response.json();
-  if (!json) {
+  try {
+    const json = await response.json();
+    return json.data;
+  } catch(error) {
     console.log(`${expectedKey} is empty, returning an object with empty ${expectedKey} `);
     return minimalJson;
   }
-  return json;
 };
 
 
@@ -156,15 +157,16 @@ firebrowse.fetch = async function(endpoint, params, groupBy) {
     const results = {[expectedKey]: []};
     const paramsMatrix = _paramsToParamsMatrix(params, groupBy);
     /** @type {Array.<Promise<number>>} */
-    const calls = [];
+    //const calls = [];
     for (let i=0; i<paramsMatrix.length; i++) {
       const paramsForThisCall = paramsMatrix[i];
+      // i/paramsMatrix.length for progress bar
+      ProgressBar.setPercentage(i/paramsMatrix.length*100, "Fetching " + expectedKey);
       // Run a fetch and then collect the data into one common object.
-      const call = _fetchFromFireBrowse(endpoint, paramsForThisCall, expectedKey)
-        .then(x => results[expectedKey].push(...x[expectedKey]));
-      calls.push(call);
+      await _fetchFromFireBrowse(endpoint, paramsForThisCall, expectedKey)
+        .then(x => {results[expectedKey].push(...x[expectedKey])});
     }
-    await Promise.all(calls);
+    ProgressBar.cleanUp();
     return results;
   }
 };
@@ -218,8 +220,8 @@ firebrowse.fetchClinicalFH = async function({cohorts, genes, barcodes, pageNum})
  */
 firebrowse.fetchCohorts = async function() {
   const params = { format: "json" };
-  const data = await firebrowse.fetch("/Metadata/Cohorts", params);
-  return data.Cohorts;
+  const fetchResponse = await firebrowse.fetch("/Metadata/Cohorts", params);
+  return fetchResponse.Cohorts;
 };
 
 /** Get the number of mRNASeq samples per cohort.
@@ -241,8 +243,8 @@ firebrowse.fetchCounts = async function(cohorts) {
     data_type: "mrnaseq",
     totals: "true",
   };
-  const data = await firebrowse.fetch("/Metadata/Counts", params);
-  return data.Counts;
+  const fetchResponse = await firebrowse.fetch("/Metadata/Counts", params);
+  return fetchResponse.Counts;
 };
 
 firebrowse.fetchMutationMAF = async function ({cohorts, genes}) {
@@ -320,7 +322,7 @@ firebrowse.fetchmRNASeq = async function({cohorts, genes, barcodes}) {
   }
   if (barcodes) {
     params.tcga_participant_barcode = barcodes;
-    groupBy.push({key: "tcga_participant_barcode", length: 100});
+    groupBy.push({key: "tcga_participant_barcode", length: 400});
   }
   const data = await firebrowse.fetch("/Samples/mRNASeq", params, groupBy);
   return data.mRNASeq;
