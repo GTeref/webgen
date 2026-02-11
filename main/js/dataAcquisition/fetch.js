@@ -7,7 +7,7 @@
  * @returns {Promise<Object.<string, Array>>} Fetched data.
  */
 const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
-  const base = "https://firebrowse.jonasalmeida.repl.co";
+  const base = "https://corsproxy.io/?url="; // temp workaround until i can figure out how to create a dedicated proxy server
   // Remove a leading / in the endpoint so we don't have duplicate / in
   // the url. Using // in a url is valid but it feels dirty.
   if (endpoint.startsWith("/")) {
@@ -15,7 +15,8 @@ const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
   }
   endpoint = `http://firebrowse.org/api/v1/${endpoint}`;
   params = new URLSearchParams(params);
-  const url = `${base}?${endpoint}?${params.toString()}`;
+  // const url = `${base}?${endpoint}?${params.toString()}`;
+  const url = `${base}${endpoint}?${params.toString()}`;
 
   const minimalJson = { [expectedKey]: [] };
 
