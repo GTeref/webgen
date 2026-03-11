@@ -716,8 +716,8 @@ function CacheInterface(nameOfDb) {
     for (let cohort in hasInterface) {
       let cachedBarcodes = await this.interface.get(cohort)
       let emptyTmp = []
-      if(newBarcodes && typeof newBarcodes !== 'undefined') { //debug
-        for (let k of newBarcodes) {
+      if(cachedBarcodes && typeof cachedBarcodes !== 'undefined') { //debug
+        for (let k of cachedBarcodes) {
           emptyTmp.push(k)
         }
       }else{

@@ -16,7 +16,8 @@ const _fetchFromFireBrowse = async function(endpoint, params, expectedKey) {
   endpoint = `http://firebrowse.org/api/v1/${endpoint}`;
   params = new URLSearchParams(params);
   // const url = `${base}?${endpoint}?${params.toString()}`;
-  const url = `${base}${endpoint}?${params.toString()}`;
+  // const url = `${base}${endpoint}?${params.toString()}`;
+  const url = `${base}${encodeURIComponent(endpoint + "?" + params.toString())}`;
 
   const minimalJson = { [expectedKey]: [] };
 
